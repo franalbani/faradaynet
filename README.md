@@ -1,0 +1,2 @@
+# faradaynet
+wireguard examples

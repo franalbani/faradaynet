@@ -1,23 +1,40 @@
 #!/bin/bash
 
-set -x
+# set -x
 
-# Setting up...
+### NAMESPACE CREATION
 ip netns add net_a
 ip netns add net_b
 ip netns add net_c
 
-ip -n net_a link set lo up
-ip -n net_b link set lo up
-ip -n net_c link set lo up
-
-ip link add brbr type bridge
-ip link set brbr up
-
+### veth CREATION
 ip link add a_eth type veth peer name a_br_eth
 ip link add b_eth type veth peer name b_br_eth
 ip link add c_eth type veth peer name c_br_eth
 
+### veth <--> namespace ASOCIATION
+ip link set a_eth netns net_a
+ip link set b_eth netns net_b
+ip link set c_eth netns net_c
+
+### ADDRESS ASIGNATION
+ip -n net_a addr add 10.0.0.1/24 dev a_eth
+ip -n net_b addr add 10.0.0.2/24 dev b_eth
+ip -n net_c addr add 10.0.0.3/24 dev c_eth
+
+### loopback & veth UP
+ip -n net_a link set lo up
+ip -n net_b link set lo up
+ip -n net_c link set lo up
+ip -n net_a link set dev a_eth up
+ip -n net_b link set dev b_eth up
+ip -n net_c link set dev c_eth up
+
+### BRIDGE CREATION
+ip link add brbr type bridge
+ip link set brbr up
+
+### veth <--> bridge CONNECTION
 ip link set a_br_eth master brbr
 ip link set b_br_eth master brbr
 ip link set c_br_eth master brbr
@@ -26,17 +43,8 @@ ip link set a_br_eth up
 ip link set b_br_eth up
 ip link set c_br_eth up
 
-ip link set a_eth netns net_a
-ip link set b_eth netns net_b
-ip link set c_eth netns net_c
-
-ip -n net_a link set dev a_eth up
-ip -n net_b link set dev b_eth up
-ip -n net_c link set dev c_eth up
-
-ip -n net_a addr add 10.0.0.2/24 dev a_eth
-ip -n net_b addr add 10.0.0.1/24 dev b_eth
-ip -n net_c addr add 10.0.0.3/24 dev c_eth
+### MAYBE
+# ip netns exec net_b sysctl net.ipv4.ip_forward=1
 
 # Wireguard
 
@@ -48,22 +56,42 @@ ip -n net_a link add dev a_wg type wireguard
 ip -n net_b link add dev b_wg type wireguard
 ip -n net_c link add dev c_wg type wireguard
 
-ip -n net_a addr add 10.0.50.2/24 dev a_wg
-ip -n net_b addr add 10.0.50.1/24 dev b_wg
+ip -n net_a addr add 10.0.50.1/24 dev a_wg
+ip -n net_b addr add 10.0.50.2/24 dev b_wg
 ip -n net_c addr add 10.0.50.3/24 dev c_wg
 
-ip netns exec net_a wg set a_wg listen-port 51801 private-key a_privatekey peer $(<b_publickey) allowed-ips 10.0.50.1 endpoint 10.0.0.1:51801
-ip netns exec net_c wg set c_wg listen-port 51801 private-key c_privatekey peer $(<b_publickey) allowed-ips 10.0.50.1 endpoint 10.0.0.1:51801
+WG_PORT=51801
+ip netns exec net_b wg set b_wg listen-port $WG_PORT private-key b_privatekey
+ip netns exec net_b wg set b_wg peer $(<a_publickey) allowed-ips 10.0.50.1/24 endpoint 10.0.0.1:$WG_PORT
+ip netns exec net_b wg set b_wg peer $(<c_publickey) allowed-ips 10.0.50.3/24 endpoint 10.0.0.3:$WG_PORT
 
-ip netns exec net_b wg set b_wg listen-port 51801 private-key b_privatekey peer $(<a_publickey) allowed-ips 10.0.50.2 endpoint 10.0.0.2:51801 peer $(<c_publickey) allowed-ips 10.0.50.3 endpoint 10.0.0.3:51801
+ip netns exec net_a wg set a_wg listen-port $WG_PORT private-key a_privatekey peer $(<b_publickey) allowed-ips 10.0.50.0/24 endpoint 10.0.0.2:$WG_PORT
+ip netns exec net_c wg set c_wg listen-port $WG_PORT private-key c_privatekey peer $(<b_publickey) allowed-ips 10.0.50.0/24 endpoint 10.0.0.2:$WG_PORT
 
 ip -n net_a link set dev a_wg up
 ip -n net_b link set dev b_wg up
 ip -n net_c link set dev c_wg up
 
-nsenter --net=/var/run/netns/net_a bash
-nsenter --net=/var/run/netns/net_a sh -c "ip a; ip r; ping -W 1 -c 1 10.0.0.1; ping -W 1 -c 1 10.0.50.1"
-nsenter --net=/var/run/netns/net_c sh -c "ip a; ip r; ping -W 1 -c 1 10.0.0.1; ping -W 1 -c 1 10.0.50.1"
+AUX=" &> /dev/null && echo -e '\033[0;32m' bien '\033[0m' || echo -e '\033[0;31m' mal '\033[0m'"
+
+for cmd in \
+        "ip a" \
+        "ip r" \
+        "ping -W 1 -c 1 10.0.0.1 $AUX "\
+        "ping -W 1 -c 1 10.0.0.2 $AUX "\
+        "ping -W 1 -c 1 10.0.0.3 $AUX "\
+        "ping -W 1 -c 1 10.0.50.1 $AUX "\
+        "ping -W 1 -c 1 10.0.50.2 $AUX "\
+        "ping -W 1 -c 1 10.0.50.3 $AUX "\
+        " "
+do
+    echo A: $cmd
+    ip netns exec net_a sh -c "$cmd"
+    echo B: $cmd
+    ip netns exec net_b sh -c "$cmd"
+    echo C: $cmd
+    ip netns exec net_c sh -c "$cmd"
+done
 
 # Setting down...
 ip -n net_a link set dev a_wg down

@@ -35,22 +35,36 @@ ip link add brbr type bridge
 ip link set brbr up
 
 ### veth <--> bridge CONNECTION
+echo br veth connection > /dev/kmsg
 ip link set a_br_eth master brbr
 ip link set b_br_eth master brbr
 ip link set c_br_eth master brbr
 
+echo br veth up > /dev/kmsg
 ip link set a_br_eth up
 ip link set b_br_eth up
 ip link set c_br_eth up
 
-### MAYBE
-# ip netns exec net_b sysctl net.ipv4.ip_forward=1
+# brctl showstp brbr
+# brctl showmacs brbr
+
+### IPv4 forwarding
+sysctl net.ipv4.ip_forward
+ip netns exec net_b sysctl net.ipv4.ip_forward
+ip netns exec net_b sysctl net.ipv4.ip_forward=1
+sysctl net.ipv4.ip_forward
+ip netns exec net_b sysctl net.ipv4.ip_forward
 
 # Wireguard
 
+### key pairs generation
 wg genkey | tee a_privatekey | wg pubkey > a_publickey
 wg genkey | tee b_privatekey | wg pubkey > b_publickey
 wg genkey | tee c_privatekey | wg pubkey > c_publickey
+
+echo A: $(<a_publickey)
+echo B: $(<b_publickey)
+echo C: $(<c_publickey)
 
 ip -n net_a link add dev a_wg type wireguard
 ip -n net_b link add dev b_wg type wireguard
@@ -60,17 +74,28 @@ ip -n net_a addr add 10.0.50.1/24 dev a_wg
 ip -n net_b addr add 10.0.50.2/24 dev b_wg
 ip -n net_c addr add 10.0.50.3/24 dev c_wg
 
-WG_PORT=51801
-ip netns exec net_b wg set b_wg listen-port $WG_PORT private-key b_privatekey
-ip netns exec net_b wg set b_wg peer $(<a_publickey) allowed-ips 10.0.50.1/24 endpoint 10.0.0.1:$WG_PORT
-ip netns exec net_b wg set b_wg peer $(<c_publickey) allowed-ips 10.0.50.3/24 endpoint 10.0.0.3:$WG_PORT
+WG_A_PORT=51801
+WG_B_PORT=51801
+WG_C_PORT=51801
 
-ip netns exec net_a wg set a_wg listen-port $WG_PORT private-key a_privatekey peer $(<b_publickey) allowed-ips 10.0.50.0/24 endpoint 10.0.0.2:$WG_PORT
-ip netns exec net_c wg set c_wg listen-port $WG_PORT private-key c_privatekey peer $(<b_publickey) allowed-ips 10.0.50.0/24 endpoint 10.0.0.2:$WG_PORT
+### HUB
+ip netns exec net_b wg set b_wg listen-port $WG_B_PORT private-key b_privatekey
+ip netns exec net_b wg set b_wg peer $(<a_publickey) allowed-ips 10.0.50.1/32 endpoint 10.0.0.1:$WG_A_PORT
+ip netns exec net_b wg set b_wg peer $(<c_publickey) allowed-ips 10.0.50.3/32 endpoint 10.0.0.3:$WG_C_PORT
+
+ip netns exec net_a wg set a_wg listen-port $WG_A_PORT private-key a_privatekey peer $(<b_publickey) allowed-ips 10.0.50.0/24 endpoint 10.0.0.2:$WG_B_PORT
+ip netns exec net_c wg set c_wg listen-port $WG_C_PORT private-key c_privatekey peer $(<b_publickey) allowed-ips 10.0.50.0/24 endpoint 10.0.0.2:$WG_B_PORT
 
 ip -n net_a link set dev a_wg up
 ip -n net_b link set dev b_wg up
 ip -n net_c link set dev c_wg up
+
+echo A wg conf
+ip netns exec net_a wg showconf a_wg
+echo B wg conf
+ip netns exec net_b wg showconf b_wg
+echo C wg conf
+ip netns exec net_c wg showconf c_wg
 
 AUX=" &> /dev/null && echo -e '\033[0;32m' bien '\033[0m' || echo -e '\033[0;31m' mal '\033[0m'"
 
@@ -93,6 +118,8 @@ do
     ip netns exec net_c sh -c "$cmd"
 done
 
+
+echo tear down > /dev/kmsg
 # Setting down...
 ip -n net_a link set dev a_wg down
 ip -n net_b link set dev b_wg down
@@ -110,5 +137,6 @@ ip netns delete net_a
 ip netns delete net_b
 ip netns delete net_c
 
+echo brbr down > /dev/kmsg
 ip link set brbr down
 brctl delbr brbr

@@ -2,21 +2,31 @@
 
 # usage: sudo -E ./wormps.sh command arg1 arg2 ...
 
+WG_DEV="vpnserver"
+WORM_NS="worm_ns"
+
+function cleanup {
+    # Bring Wireguard down:
+    ip -n $WORM_NS link set $WG_DEV down || true
+    ip -n $WORM_NS link delete $WG_DEV || true
+    # Remove network namespace:
+    ip netns delete $WORM_NS || true
+}
+trap cleanup EXIT
+
 set -x
 
-VPN_SERVER_PUBLIC_KEY="abcdef0123456789...." # put your vpn provider public key here
-VPN_SERVER_ENDPOINT="addr:port" # put your vpn provider endpoint here
+VPN_SERVER_PUBLIC_KEY="BSXSJgI+cpLA2TrGL2swcqaXuCSjNNw9PVK7E0yCqFo="
+VPN_SERVER_ENDPOINT="66.90.72.170:51820"
 MY_IP="10.2.0.2/32" # put your the ip your vpn provider assigned you here
 MY_PRIVATE_KEY_PATH="my_privatekey" # put the path to a file containing your private key here
 
 # First create Wireguard interface in initial/root namespace
 # so the UDP socket is created here and can access internet
 # after being moved to another network namespace:
-WG_DEV="vpnserver"
 ip link add dev $WG_DEV type wireguard
 
 # Create namespace
-WORM_NS="worm_ns"
 ip netns add $WORM_NS
 
 # Move wg dev to netns
@@ -37,11 +47,6 @@ ip -n $WORM_NS route add default dev $WG_DEV
 
 # This executes your commmand + args (represented by $@)
 # as your original user (not root) inside the $WORM_NS:
-ip netns exec $WORM_NS sudo -E -u \#$(id -u) -g \#$(id -g) "$@"
 
-# Bring Wireguard down:
-ip -n $WORM_NS link set $WG_DEV down
-ip -n $WORM_NS link delete $WG_DEV
+ip netns exec $WORM_NS sudo -u $SUDO_USER -g $SUDO_USER "$@"
 
-# Remove network namespace:
-ip netns delete $WORM_NS

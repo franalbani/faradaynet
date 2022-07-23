@@ -16,9 +16,12 @@ trap cleanup EXIT
 
 set -x
 
-VPN_SERVER_PUBLIC_KEY="put_the_server_public_key_here"
-VPN_SERVER_ENDPOINT="put_the_server_ip:port_here"
-MY_IP="put_the_ip_your_vpn_provider_assigned_you_here"
+# Save the server public key in the file `server_publickey`
+# Save the server endpoint in the file `server_endpoint`
+
+VPN_SERVER_PUBLIC_KEY=$( < server_publickey )
+VPN_SERVER_ENDPOINT=$( < server_endpoint )
+MY_IP=$( < my_ip )
 MY_PRIVATE_KEY_PATH="my_privatekey" # put the path to a file containing your private key here
 
 # First create Wireguard interface in initial/root namespace

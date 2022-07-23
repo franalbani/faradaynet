@@ -32,3 +32,10 @@
 | `c_wg`   | `net_c`   | wireguard | 10.0.50.2   | 10.0.50.3   | 51801          |
 
 * `sudo ./central_node.sh`
+
+## Worm PS
+
+Run a command inside a network namespace that only has
+internet access through a VPN provider.
+
+`sudo ./wormps.sh cmd arg1 arg3 ...`
